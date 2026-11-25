@@ -3,24 +3,33 @@ defmodule SymphonyElixirWeb.Presenter do
   Shared projections for the observability API and dashboard.
   """
 
-  alias SymphonyElixir.{Config, Orchestrator, StatusDashboard, Workspace}
+  alias SymphonyElixir.{Config, Fleet, Orchestrator, StatusDashboard, Workspace}
+  alias SymphonyElixir.Fleet.Poller
 
-  @spec state_payload(GenServer.name(), timeout()) :: map()
-  def state_payload(orchestrator, snapshot_timeout_ms) do
+  @spec state_payload(GenServer.name(), timeout(), GenServer.name()) :: map()
+  def state_payload(orchestrator, snapshot_timeout_ms, fleet \\ Poller) do
     generated_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
     case Orchestrator.snapshot(orchestrator, snapshot_timeout_ms) do
       %{} = snapshot ->
+        running = Enum.map(snapshot.running, &running_entry_payload/1)
+        blocked = Enum.map(Map.get(snapshot, :blocked, []), &blocked_entry_payload/1)
+        fleet_snapshot = Poller.snapshot(fleet)
+        agents = Fleet.merge(Fleet.symphony_agents(running, blocked, local_host()), fleet_snapshot.agents)
+
         %{
           generated_at: generated_at,
           counts: %{
             running: length(snapshot.running),
             retrying: length(snapshot.retrying),
-            blocked: length(Map.get(snapshot, :blocked, []))
+            blocked: length(blocked),
+            agents: length(agents)
           },
-          running: Enum.map(snapshot.running, &running_entry_payload/1),
+          agents: agents,
+          fleet: Map.take(fleet_snapshot, [:enabled, :fetched_at, :error]),
+          running: running,
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
-          blocked: Enum.map(Map.get(snapshot, :blocked, []), &blocked_entry_payload/1),
+          blocked: blocked,
           codex_totals: snapshot.codex_totals,
           rate_limits: snapshot.rate_limits
         }
@@ -61,6 +70,11 @@ defmodule SymphonyElixirWeb.Presenter do
       payload ->
         {:ok, Map.update!(payload, :requested_at, &DateTime.to_iso8601/1)}
     end
+  end
+
+  defp local_host do
+    {:ok, host} = :inet.gethostname()
+    host |> to_string() |> String.split(".") |> List.first()
   end
 
   defp issue_payload_body(issue_identifier, running, retry, blocked) do

@@ -289,6 +289,37 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  defmodule Fleet do
+    @moduledoc """
+    Agents outside Symphony, read from devx claim comments in Linear.
+
+    The fleet is on when `team` is set (a Linear team key such as "PAY") or when
+    `enabled` is true, in which case it reads the tracker's `project_slug`.
+    `projects` narrows a team to Linear project names.
+    """
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:enabled, :boolean, default: false)
+      field(:team, :string)
+      field(:projects, {:array, :string}, default: [])
+      field(:states, {:array, :string}, default: ["In Progress"])
+      field(:claim_ttl_minutes, :integer, default: 180)
+      field(:interval_ms, :integer, default: 60_000)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:enabled, :team, :projects, :states, :claim_ttl_minutes, :interval_ms], empty_values: [])
+      |> validate_length(:states, min: 1)
+      |> validate_number(:claim_ttl_minutes, greater_than: 0)
+      |> validate_number(:interval_ms, greater_than_or_equal_to: 5_000)
+    end
+  end
+
   embedded_schema do
     embeds_one(:tracker, Tracker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:polling, Polling, on_replace: :update, defaults_to_struct: true)
@@ -299,6 +330,7 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:fleet, Fleet, on_replace: :update, defaults_to_struct: true)
   end
 
   @spec parse(map()) :: {:ok, %__MODULE__{}} | {:error, {:invalid_workflow_config, String.t()}}
@@ -393,6 +425,7 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
+    |> cast_embed(:fleet, with: &Fleet.changeset/2)
   end
 
   defp finalize_settings(settings) do

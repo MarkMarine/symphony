@@ -10,7 +10,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
-    json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
+    json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms(), fleet()))
   end
 
   @spec issue(Conn.t(), map()) :: Conn.t()
@@ -51,6 +51,10 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     conn
     |> put_status(status)
     |> json(%{error: %{code: code, message: message}})
+  end
+
+  defp fleet do
+    Endpoint.config(:fleet) || SymphonyElixir.Fleet.Poller
   end
 
   defp orchestrator do

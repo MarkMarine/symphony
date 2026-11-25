@@ -303,6 +303,28 @@ The observability UI now runs on a minimal Phoenix stack:
 - Phoenix dependency static assets for the LiveView client bootstrap
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
 
+### Agents outside Symphony (devx fleet)
+
+The dashboard's **Agents** table lists Symphony's own sessions and, when a `fleet` block is set,
+every agent that holds a claim through PayOnce `devx work` / `devx loop`: Claude Code, Codex or pi on a
+laptop, in the NixOS agent box, or in a Codex cloud task. Those agents never talk to Symphony. They
+post Linear comments that end in `devx-claim:`, `devx-heartbeat:` or `devx-release:` lines, and the
+claim names the agent, machine and workspace. Symphony reads those comments from Linear, so an agent
+shows up wherever it runs, with no extra network path back to this machine.
+
+```yaml
+fleet:
+  team: PAY                  # Linear team key; turns the fleet on
+  projects: []               # optional Linear project names to narrow the team
+  states: ["In Progress"]    # devx working_state
+  claim_ttl_minutes: 180     # match devx; quieter claims show as "stale"
+  interval_ms: 60000         # one Linear query per minute
+```
+
+With `enabled: true` and no `team`, the fleet reads the tracker's `project_slug` instead. Reads use
+the tracker's Linear credentials and only fetch comments containing `devx-`. Nothing is written to
+Linear. `/api/v1/state` returns the same list under `agents`, with poll status under `fleet`.
+
 ## Project Layout
 
 - `lib/`: application code and Mix tasks
