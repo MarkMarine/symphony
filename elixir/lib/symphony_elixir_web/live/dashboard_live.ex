@@ -80,6 +80,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
       <% else %>
         <section class="metric-grid">
           <article class="metric-card">
+            <p class="metric-label">Agents</p>
+            <p class="metric-value numeric"><%= @payload.counts.agents %></p>
+            <p class="metric-detail">Symphony sessions plus devx agents holding Linear claims.</p>
+          </article>
+
+          <article class="metric-card">
             <p class="metric-label">Running</p>
             <p class="metric-value numeric"><%= @payload.counts.running %></p>
             <p class="metric-detail">Active issue sessions in the current runtime.</p>
@@ -110,6 +116,66 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <p class="metric-value numeric"><%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %></p>
             <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
           </article>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Agents</h2>
+              <p class="section-copy">
+                Every agent working the board: Symphony's own sessions and devx agents (laptops, the agent box, Codex cloud) from their Linear claims.
+                <%= fleet_status(@payload.fleet) %>
+              </p>
+            </div>
+          </div>
+
+          <%= if @payload.agents == [] do %>
+            <p class="empty-state">No agents are working right now.</p>
+          <% else %>
+            <div class="table-wrap">
+              <table class="data-table" style="min-width: 900px;">
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th>Machine</th>
+                    <th>Issue</th>
+                    <th>Status</th>
+                    <th>Latest update</th>
+                    <th>Workspace</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={agent <- @payload.agents}>
+                    <td>
+                      <div class="detail-stack">
+                        <span><%= agent.agent || "unknown" %></span>
+                        <span class="muted"><%= agent.source %></span>
+                      </div>
+                    </td>
+                    <td class="mono"><%= agent.machine || "n/a" %></td>
+                    <td>
+                      <div class="issue-stack">
+                        <%= if agent.issue_identifier do %>
+                          <.issue_identifier identifier={agent.issue_identifier} url={agent.issue_url} />
+                        <% end %>
+                        <span :if={agent.issue_title} class="muted"><%= agent.issue_title %></span>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="detail-stack">
+                        <span class={agent_status_class(agent.status)}><%= agent.status %></span>
+                        <span class="muted numeric"><%= time_ago(agent.last_seen_at, @now) %></span>
+                      </div>
+                    </td>
+                    <td>
+                      <span class="event-text" title={agent.last_message || "n/a"}><%= agent.last_message || "n/a" %></span>
+                    </td>
+                    <td class="mono"><%= agent.workspace || "n/a" %></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
         </section>
 
         <section class="section-card">
@@ -330,7 +396,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   defp load_payload do
-    Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
+    Presenter.state_payload(orchestrator(), snapshot_timeout_ms(), fleet())
+  end
+
+  defp fleet do
+    Endpoint.config(:fleet) || SymphonyElixir.Fleet.Poller
   end
 
   defp orchestrator do
@@ -436,6 +506,35 @@ defmodule SymphonyElixirWeb.DashboardLive do
       true -> base
     end
   end
+
+  defp fleet_status(%{enabled: true, error: error}) when is_binary(error),
+    do: "Linear read failed (#{error}); showing the last good list."
+
+  defp fleet_status(%{enabled: true, fetched_at: fetched_at}) when is_binary(fetched_at),
+    do: "Claims read from Linear at #{fetched_at}."
+
+  defp fleet_status(%{enabled: true}), do: "Reading claims from Linear."
+
+  defp fleet_status(_fleet), do: "devx agents are not shown: add a fleet block to WORKFLOW.md."
+
+  defp agent_status_class("active"), do: "state-badge state-badge-active"
+  defp agent_status_class("blocked"), do: "state-badge state-badge-danger"
+  defp agent_status_class("stale"), do: "state-badge state-badge-warning"
+  defp agent_status_class(_status), do: "state-badge"
+
+  defp time_ago(at, %DateTime{} = now) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, parsed, _offset} -> format_ago(max(DateTime.diff(now, parsed, :second), 0))
+      _ -> "n/a"
+    end
+  end
+
+  defp time_ago(_at, _now), do: "n/a"
+
+  defp format_ago(seconds) when seconds < 60, do: "just now"
+  defp format_ago(seconds) when seconds < 3_600, do: "#{div(seconds, 60)}m ago"
+  defp format_ago(seconds) when seconds < 86_400, do: "#{div(seconds, 3_600)}h #{rem(div(seconds, 60), 60)}m ago"
+  defp format_ago(seconds), do: "#{div(seconds, 86_400)}d ago"
 
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)

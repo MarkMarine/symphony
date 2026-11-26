@@ -4,6 +4,8 @@ defmodule SymphonyElixir.ExtensionsTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
+  alias SymphonyElixir.Config.Schema
+  alias SymphonyElixir.Fleet.Poller
   alias SymphonyElixir.Linear.Adapter
   alias SymphonyElixir.Tracker.Memory
 
@@ -262,7 +264,9 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert state_payload == %{
              "generated_at" => state_payload["generated_at"],
-             "counts" => %{"running" => 1, "retrying" => 1, "blocked" => 1},
+             "counts" => %{"running" => 1, "retrying" => 1, "blocked" => 1, "agents" => 2},
+             "agents" => state_payload["agents"],
+             "fleet" => %{"enabled" => false, "fetched_at" => nil, "error" => nil},
              "running" => [
                %{
                  "issue_id" => "issue-http",
@@ -316,6 +320,16 @@ defmodule SymphonyElixir.ExtensionsTest do
              },
              "rate_limits" => %{"primary" => %{"remaining" => 11}}
            }
+
+    assert [
+             %{"source" => "symphony", "status" => _, "agent" => "codex", "issue_identifier" => _},
+             %{"source" => "symphony", "agent" => "codex", "issue_identifier" => _}
+           ] = state_payload["agents"]
+
+    assert state_payload["agents"] |> Enum.map(& &1["issue_identifier"]) |> Enum.sort() == ["MT-BLOCKED", "MT-HTTP"]
+
+    assert %{"status" => "blocked", "machine" => "dm-dev2", "last_message" => "turn blocked: waiting for user input"} =
+             Enum.find(state_payload["agents"], &(&1["issue_identifier"] == "MT-BLOCKED"))
 
     conn = get(build_conn(), "/api/v1/MT-HTTP")
     issue_payload = json_response(conn, 200)
@@ -565,6 +579,59 @@ defmodule SymphonyElixir.ExtensionsTest do
     refute render(view) =~ "javascript:alert"
   end
 
+  test "dashboard liveview lists devx agents beside symphony sessions" do
+    orchestrator_name = Module.concat(__MODULE__, :FleetDashboardOrchestrator)
+    fleet_name = Module.concat(__MODULE__, :FleetDashboardPoller)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{queued: true, coalesced: false, requested_at: DateTime.utc_now(), operations: ["poll"]}
+      )
+
+    claimed =
+      %{
+        "identifier" => "PAY-42",
+        "title" => "Teach the dashboard about devx",
+        "url" => "https://linear.app/payonce/issue/PAY-42",
+        "state" => %{"name" => "In Progress"},
+        "comments" => %{
+          "nodes" => [
+            %{
+              "body" => "Claimed by devx work.\n\n- agent: pi\n- machine: macbook\n- workspace: `/Users/m/code/ags/_ws/pay-42`\n\ndevx-claim: 11111111-1111-4111-8111-111111111111",
+              "createdAt" => DateTime.utc_now() |> DateTime.to_iso8601()
+            }
+          ]
+        }
+      }
+
+    start_supervised!(
+      {Poller,
+       name: fleet_name,
+       settings_fun: fn -> {%Schema.Fleet{team: "PAY"}, nil} end,
+       graphql_fun: fn _query, _variables ->
+         {:ok, %{"data" => %{"issues" => %{"nodes" => [claimed], "pageInfo" => %{"hasNextPage" => false}}}}}
+       end},
+      id: fleet_name
+    )
+
+    assert_eventually(fn -> Poller.snapshot(fleet_name).agents != [] end)
+    start_test_endpoint(orchestrator: orchestrator_name, fleet: fleet_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+    assert html =~ "Agents"
+    assert html =~ "PAY-42"
+    assert html =~ "Teach the dashboard about devx"
+    assert html =~ "macbook"
+    assert html =~ "/Users/m/code/ags/_ws/pay-42"
+    assert html =~ "Claims read from Linear at"
+    assert html =~ "MT-BLOCKED"
+
+    assert %{"counts" => %{"agents" => 3}, "fleet" => %{"enabled" => true, "error" => nil}} =
+             build_conn() |> get("/api/v1/state") |> json_response(200)
+  end
+
   test "dashboard liveview renders an unavailable state without crashing" do
     start_test_endpoint(
       orchestrator: Module.concat(__MODULE__, :MissingDashboardOrchestrator),
@@ -610,7 +677,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     response = Req.get!("http://127.0.0.1:#{port}/api/v1/state")
     assert response.status == 200
-    assert response.body["counts"] == %{"running" => 1, "retrying" => 1, "blocked" => 1}
+    assert response.body["counts"] == %{"running" => 1, "retrying" => 1, "blocked" => 1, "agents" => 2}
 
     dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
     assert dashboard_css.status == 200
