@@ -40,6 +40,7 @@ defmodule SymphonyElixir.Application do
       SymphonyElixir.WorkflowStore,
       SymphonyElixir.Fleet.Poller,
       SymphonyElixir.AgentRuntimeSupervisor,
+      SymphonyElixir.Agents.ToolBridge,
       SymphonyElixir.HttpServer,
       SymphonyElixir.StatusDashboard
     ]

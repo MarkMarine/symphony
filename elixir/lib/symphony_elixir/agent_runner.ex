@@ -1,10 +1,11 @@
 defmodule SymphonyElixir.AgentRunner do
   @moduledoc """
-  Executes a single tracker work item in its workspace with Codex.
+  Executes a single tracker work item in its workspace with the configured
+  coding agent (Codex, Claude Code or pi). See `SymphonyElixir.AgentAdapter`.
   """
 
   require Logger
-  alias SymphonyElixir.Codex.AppServer
+  alias SymphonyElixir.AgentAdapter
   alias SymphonyElixir.{Config, PromptBuilder, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
@@ -89,11 +90,16 @@ defmodule SymphonyElixir.AgentRunner do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issues_by_ids/1)
 
-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
+    adapter = Keyword.get_lazy(opts, :agent_adapter, fn -> AgentAdapter.for_issue(issue) end)
+    opts = Keyword.put(opts, :agent_adapter, adapter)
+
+    Logger.info("Using agent adapter #{inspect(adapter)} for #{issue_context(issue)}")
+
+    with {:ok, session} <- adapter.start_session(workspace, worker_host: worker_host, issue: issue) do
       try do
         do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
       after
-        AppServer.stop_session(session)
+        adapter.stop_session(session)
       end
     end
   end
@@ -102,7 +108,7 @@ defmodule SymphonyElixir.AgentRunner do
     prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
 
     with {:ok, turn_session} <-
-           AppServer.run_turn(
+           Keyword.fetch!(opts, :agent_adapter).run_turn(
              app_session,
              prompt,
              issue,
@@ -145,7 +151,7 @@ defmodule SymphonyElixir.AgentRunner do
     """
     Continuation guidance:
 
-    - The previous Codex turn completed normally, but the tracker work item is still in an active state.
+    - The previous agent turn completed normally, but the tracker work item is still in an active state.
     - This is continuation turn ##{turn_number} of #{max_turns} for the current agent run.
     - Resume from the current workspace and workpad state instead of restarting from scratch.
     - The original task instructions and prior turn context are already present in this thread, so do not restate them before acting.

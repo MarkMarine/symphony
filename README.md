@@ -10,6 +10,11 @@ _In this [demo video](https://player.vimeo.com/video/1186371009?h=5626e4b899), S
 > [!WARNING]
 > Symphony is a low-key engineering preview for testing in trusted environments.
 
+> [!NOTE]
+> This fork adds Claude Code and pi as coding agents alongside Codex, selectable per workflow or
+> per issue label. See
+> [elixir/README.md](elixir/README.md#coding-agents-codex-claude-code-and-pi).
+
 ## Running Symphony
 
 ### Requirements

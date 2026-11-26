@@ -293,6 +293,53 @@ codex:
 - `gitlab_api` forwards raw GitLab REST requests with host-side auth and keeps configured tracker
   credentials and provider authentication aliases out of the Codex child.
 
+## Coding agents: Codex, Claude Code and pi
+
+Symphony drives Codex by default. This fork can also drive
+[Claude Code](https://docs.claude.com/en/docs/claude-code) and the
+[pi coding agent](https://github.com/badlogic/pi-mono) through the same runner, so one board can
+spread work across several subscriptions.
+
+```yaml
+agent:
+  kind: codex                # default agent: codex | claude | pi
+  kind_by_label:             # optional per-issue routing; first matching label wins
+    "agent: claude": claude
+    "agent: pi": pi
+  tool_bridge_url: http://imac.local:4000   # only needed for SSH workers
+claude:
+  command: claude -p --input-format stream-json --output-format stream-json --verbose --permission-mode bypassPermissions
+  turn_timeout_ms: 3600000
+pi:
+  command: pi --mode rpc
+  turn_timeout_ms: 3600000
+server:
+  port: 4000                 # the tool bridge is served by the HTTP server
+```
+
+How each agent runs:
+
+- **Codex**: unchanged, `codex.command` speaking the app-server protocol.
+- **Claude Code**: one `claude -p --input-format stream-json --output-format stream-json`
+  process per issue run. Each turn writes one user message and waits for the `result` event, so
+  continuation turns keep context. Usage from `result` events feeds the dashboard token counts.
+- **pi**: one `pi --mode rpc` process per issue run. Each turn sends a `prompt` command and waits
+  for `agent_end`. Extension dialogs (select, confirm, input, editor) are cancelled because runs are
+  unattended. Pick the provider and model in `pi.command`, for example
+  `pi --mode rpc --provider anthropic --model claude-sonnet-4-5`.
+
+Tracker tools for Claude Code and pi: they cannot receive Codex dynamic tools, so Symphony serves
+the same host-side tools (for Linear, `linear_graphql`) at `POST /api/v1/agent_tools/<tool>`. Each
+session gets a random bearer token in `SYMPHONY_TOOL_TOKEN` and the URL in `SYMPHONY_TOOL_URL`, and
+the first prompt explains how to call it with `curl`. Tracker API keys stay out of the agent's
+environment, as with Codex. This needs `server.port` (or `--port`). For SSH workers, set
+`agent.tool_bridge_url` to an address the worker can reach and bind `server.host` to a matching
+interface; without it, SSH sessions run without tracker tools and a warning is logged.
+
+Sandboxing: Claude Code and pi do not use Codex's sandbox settings. The default Claude command uses
+`--permission-mode bypassPermissions` so unattended runs can edit files and run commands; only run
+it on machines and workspaces you trust, or tighten it with `--allowedTools`.
+
 ## Web dashboard
 
 The observability UI now runs on a minimal Phoenix stack:
