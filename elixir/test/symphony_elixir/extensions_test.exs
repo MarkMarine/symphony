@@ -4,6 +4,8 @@ defmodule SymphonyElixir.ExtensionsTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
+  alias SymphonyElixir.Config.Schema
+  alias SymphonyElixir.Fleet.Poller
   alias SymphonyElixir.Linear.Adapter
   alias SymphonyElixir.Tracker.Memory
 
@@ -605,16 +607,16 @@ defmodule SymphonyElixir.ExtensionsTest do
       }
 
     start_supervised!(
-      {SymphonyElixir.Fleet.Poller,
+      {Poller,
        name: fleet_name,
-       settings_fun: fn -> {%SymphonyElixir.Config.Schema.Fleet{team: "PAY"}, nil} end,
+       settings_fun: fn -> {%Schema.Fleet{team: "PAY"}, nil} end,
        graphql_fun: fn _query, _variables ->
          {:ok, %{"data" => %{"issues" => %{"nodes" => [claimed], "pageInfo" => %{"hasNextPage" => false}}}}}
        end},
       id: fleet_name
     )
 
-    assert_eventually(fn -> SymphonyElixir.Fleet.Poller.snapshot(fleet_name).agents != [] end)
+    assert_eventually(fn -> Poller.snapshot(fleet_name).agents != [] end)
     start_test_endpoint(orchestrator: orchestrator_name, fleet: fleet_name, snapshot_timeout_ms: 50)
 
     {:ok, _view, html} = live(build_conn(), "/")
@@ -675,7 +677,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     response = Req.get!("http://127.0.0.1:#{port}/api/v1/state")
     assert response.status == 200
-    assert response.body["counts"] == %{"running" => 1, "retrying" => 1, "blocked" => 1}
+    assert response.body["counts"] == %{"running" => 1, "retrying" => 1, "blocked" => 1, "agents" => 2}
 
     dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
     assert dashboard_css.status == 200
